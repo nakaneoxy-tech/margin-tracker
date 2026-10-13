@@ -1,0 +1,58 @@
+# JPX の銘柄別信用取引残高を毎日取り込み、data/daily/ に貯めて GitHub Pages に公開する。
+# JPX の掲載は直近5営業日分だけなので、止まったまま5営業日を超えるとその間は欠ける。
+name: update-data
+
+on:
+  schedule:
+    - cron: "14 8 * * 1-5"    # 平日 17:14 JST
+    - cron: "14 12 * * 1-5"   # 平日 21:14 JST（公表が遅れた日の取りこぼし用）
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["index.html", "*.py", ".github/workflows/update-data.yml"]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 残高を取り込む
+        run: |
+          sudo apt-get install -y -qq poppler-utils
+          pip install -q openpyxl
+          python tracker.py
+
+      - name: データをコミット
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/daily
+          git diff --cached --quiet || git commit -m "data: $(TZ=Asia/Tokyo date +%F) 取り込み"
+          git push
+
+      - name: サイトを作る
+        run: python build_site.py
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4

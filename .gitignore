@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+_site/
+data/raw/
+data/*.db*
+data/*.log
+.claude/

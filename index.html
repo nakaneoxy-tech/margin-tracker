@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>信用買い残 平均建玉トラッカー</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--line:#e3e6ea;--text:#1c2430;--sub:#6b7684;--up:#c0392b;--down:#1e7f4f;--accent:#2f6fde;--hover:#eef3fc}
+@media (prefers-color-scheme:dark){:root{--bg:#12151a;--panel:#1b2027;--line:#2c333d;--text:#e6e9ee;--sub:#909baa;--up:#ff7a6b;--down:#4cc38a;--accent:#6ea2ff;--hover:#232b36}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Yu Gothic UI",Meiryo,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:14px 20px;border-bottom:1px solid var(--line);background:var(--panel)}
+h1{font-size:17px;margin:0 auto 0 0}
+h1 small{font-weight:400;color:var(--sub);margin-left:10px;font-size:12px}
+input,button,select{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 10px}
+input{width:220px}
+button{cursor:pointer}button:hover{border-color:var(--accent)}
+button:disabled{opacity:.5;cursor:wait}
+main{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:16px;padding:16px 20px;align-items:start}
+@media (max-width:1100px){main{grid-template-columns:1fr;padding:12px}.scroll{max-height:60vh}#detail{position:static}header{padding:12px}input#q{width:100%}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.scroll{max-height:calc(100vh - 110px);overflow:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
+th{position:sticky;top:0;background:var(--panel);color:var(--sub);font-weight:600;font-size:12px;cursor:pointer;user-select:none}
+th.sorted{color:var(--accent)}
+td.l,th.l{text-align:left}
+td.name{white-space:normal;min-width:140px}
+tbody tr{cursor:pointer}tbody tr:hover,tbody tr.sel{background:var(--hover)}
+.up{color:var(--up)}.down{color:var(--down)}.sub{color:var(--sub)}
+.tag{display:inline-block;font-size:11px;padding:0 5px;border:1px solid var(--line);border-radius:4px;color:var(--sub);margin-right:3px}
+#detail{padding:16px;position:sticky;top:16px}
+#detail h2{font-size:16px;margin:0 0 2px}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}
+.kpi{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.kpi b{display:block;font-size:17px;font-variant-numeric:tabular-nums}
+.kpi span{font-size:11px;color:var(--sub)}
+.chart{height:230px;margin-bottom:12px}
+#status{font-size:12px;color:var(--sub)}
+.empty{padding:40px;text-align:center;color:var(--sub)}
+</style>
+</head>
+<body>
+<header>
+  <h1>信用買い残 平均建玉トラッカー<small id="asof"></small></h1>
+  <span id="status"></span>
+  <label class="sub"><input type="checkbox" id="daily" style="width:auto"> 日々公表銘柄等のみ</label>
+  <select id="market"><option value="">全市場</option><option>プライム</option><option>スタンダード</option><option>グロース</option><option>投信等</option><option>他</option></select>
+  <input id="q" placeholder="コード・銘柄名で検索">
+</header>
+<main>
+  <div class="panel scroll"><table>
+    <thead><tr id="head"></tr></thead>
+    <tbody id="body"></tbody>
+  </table><div id="empty" class="empty" hidden></div></div>
+  <div class="panel" id="detail"><div class="empty">銘柄をクリックすると推移を表示します</div></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const f0 = v => v == null ? '–' : Math.round(v).toLocaleString('ja-JP');
+const f1 = v => v == null ? '–' : v.toLocaleString('ja-JP', {minimumFractionDigits: 1, maximumFractionDigits: 1});
+const pct = v => v == null ? '–' : (v > 0 ? '+' : '') + f1(v) + '%';
+const sign = v => v == null ? '–' : (v > 0 ? '+' : '') + f1(v);
+const cls = v => v > 0 ? 'up' : v < 0 ? 'down' : '';
+const ticker = c => c.slice(0, 4);
+
+// 乖離率 = 株価が平均建玉単価から何%離れているか（マイナス = 買い方が含み損）
+const COLS = [
+  ['code', 'コード', r => ticker(r.code), 'l'],
+  ['name', '銘柄', r => `${r.flag ? `<span class="tag">${r.flag}</span>` : ''}${r.name}<div class="sub" style="font-size:11px">${r.market} ${r.kind}</div>`, 'l name'],
+  ['avg', '平均建玉単価', r => f1(r.avg)],
+  ['avgChg', '前日比', r => `<span class="${cls(r.avgChg)}">${sign(r.avgChg)}</span>`],
+  ['close', '終値', r => f1(r.close)],
+  ['gap', '乖離率', r => `<span class="${cls(r.gap)}">${pct(r.gap)}</span>`],
+  ['buy_val', '買残金額(百万円)', r => r.buy_val == null ? '–' : f1(r.buy_val / 1e6)],
+  ['buy_sh', '買残(株)', r => f0(r.buy_sh)],
+  ['buy_chg_sh', '買残前日比', r => `<span class="${cls(r.buy_chg_sh)}">${r.buy_chg_sh > 0 ? '+' : ''}${f0(r.buy_chg_sh)}</span>`],
+  ['buy_ratio', '上場比', r => r.buy_ratio == null ? '–' : f1(r.buy_ratio) + '%'],
+];
+let all = [], meta = {}, rows = [], sortKey = 'buy_val', sortDir = -1, selected = null, charts = [];
+
+function derive(r) {
+  r.avgChg = r.avg != null && r.avg_prev != null ? Math.round((r.avg - r.avg_prev) * 10) / 10 : null;
+  r.gap = r.avg && r.close ? (r.close / r.avg - 1) * 100 : null;
+  return r;
+}
+
+function render() {
+  $('head').innerHTML = COLS.map(([k, label, , c]) =>
+    `<th data-k="${k}" class="${(c || '').split(' ')[0]} ${k === sortKey ? 'sorted' : ''}">${label}${k === sortKey ? (sortDir > 0 ? ' ▲' : ' ▼') : ''}</th>`).join('');
+  const sorted = [...rows].sort((a, b) => {
+    const x = a[sortKey], y = b[sortKey];
+    if (x == null) return 1; if (y == null) return -1;
+    return (typeof x === 'string' ? x.localeCompare(y) : x - y) * sortDir;
+  });
+  $('body').innerHTML = sorted.slice(0, MAX_ROWS).map(r =>
+    `<tr data-code="${r.code}" class="${r.code === selected ? 'sel' : ''}">${COLS.map(([, , fn, c]) => `<td class="${c || ''}">${fn(r)}</td>`).join('')}</tr>`).join('');
+  $('empty').hidden = rows.length > 0;
+}
+
+const MAX_ROWS = 300;   // スマホでも軽く動くよう、表示は並べ替え後の上位だけ
+function applyFilter() {
+  const q = $('q').value.trim().toLowerCase(), m = $('market').value, daily = $('daily').checked;
+  rows = all.filter(r => (!q || r.code.toLowerCase().startsWith(q) || r.name.toLowerCase().includes(q))
+    && (!m || r.market === m) && (!daily || r.flag));
+  $('asof').textContent = `${meta.date} 申込み現在 ／ ${rows.length.toLocaleString()} 銘柄` +
+    (rows.length > MAX_ROWS ? `（上位${MAX_ROWS}件を表示）` : '');
+  render();
+}
+
+async function load() {
+  meta = await (await fetch('data/list.json', {cache: 'no-cache'})).json();
+  all = meta.rows.map(derive);
+  $('status').textContent = `${meta.days}日分 ／ 更新 ${meta.updated}`;
+  $('empty').textContent = '該当する銘柄がありません';
+  applyFilter();
+}
+
+async function showDetail(code) {
+  selected = code; render();
+  const d = await (await fetch(`data/hist/${code}.json`, {cache: 'no-cache'})).json();
+  const h = d.rows, last = h[h.length - 1];
+  if (!last) return;
+  const gap = last.avg && last.close ? (last.close / last.avg - 1) * 100 : null;
+  $('detail').innerHTML = `
+    <h2>${ticker(code)} ${d.name}</h2><div class="sub">${d.market} ${d.kind}　${h[0].date} 〜 ${last.date}（${h.length}日分）</div>
+    <div class="kpis">
+      <div class="kpi"><span>平均建玉単価</span><b>${f1(last.avg)}</b></div>
+      <div class="kpi"><span>終値</span><b>${f1(last.close)}</b></div>
+      <div class="kpi"><span>乖離率（買い方損益の目安）</span><b class="${cls(gap)}">${pct(gap)}</b></div>
+      <div class="kpi"><span>制度信用 平均単価</span><b>${f1(last.avg_std)}</b></div>
+      <div class="kpi"><span>一般信用 平均単価</span><b>${f1(last.avg_neg)}</b></div>
+      <div class="kpi"><span>買残金額（百万円）</span><b>${f1(last.buy_val / 1e6)}</b></div>
+    </div>
+    <div class="chart"><canvas id="c1"></canvas></div>
+    <div class="chart"><canvas id="c2"></canvas></div>`;
+  if (innerWidth <= 1100) $('detail').scrollIntoView({behavior: 'smooth'});
+  charts.forEach(c => c.destroy());
+  const css = getComputedStyle(document.documentElement);
+  const col = n => css.getPropertyValue(n).trim();
+  Chart.defaults.color = col('--sub'); Chart.defaults.borderColor = col('--line');
+  const labels = h.map(r => r.date.slice(5));
+  const line = (label, data, color, dash) => ({label, data, borderColor: color, backgroundColor: color, borderDash: dash, tension: .2, pointRadius: 3, spanGaps: true});
+  charts = [
+    new Chart($('c1'), {type: 'line', data: {labels, datasets: [
+      line('平均建玉単価', h.map(r => r.avg), col('--accent')),
+      line('終値', h.map(r => r.close), col('--up'), [4, 3]),
+    ]}, options: {maintainAspectRatio: false, interaction: {mode: 'index', intersect: false}}}),
+    new Chart($('c2'), {type: 'bar', data: {labels, datasets: [
+      {label: '買残 制度信用(株)', data: h.map(r => r.buy_std_sh), backgroundColor: col('--accent'), stack: 's'},
+      {label: '買残 一般信用(株)', data: h.map(r => r.buy_neg_sh), backgroundColor: col('--sub'), stack: 's'},
+    ]}, options: {maintainAspectRatio: false, interaction: {mode: 'index', intersect: false}, scales: {x: {stacked: true}, y: {stacked: true}}}}),
+  ];
+}
+
+$('head').onclick = e => {
+  const k = e.target.dataset.k; if (!k) return;
+  sortDir = k === sortKey ? -sortDir : (k === 'code' || k === 'name' || k === 'gap' ? 1 : -1); sortKey = k; render();
+};
+$('body').onclick = e => { const tr = e.target.closest('tr'); if (tr) showDetail(tr.dataset.code); };
+$('market').onchange = $('daily').onchange = applyFilter;
+let timer; $('q').oninput = () => { clearTimeout(timer); timer = setTimeout(applyFilter, 200); };
+load();
+</script>
+</body>
+</html>
