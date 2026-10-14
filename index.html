@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>信用買い残 平均建玉トラッカー</title>
+<title>信用買い残 平均建値トラッカー</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root{--bg:#f6f7f9;--panel:#fff;--line:#e3e6ea;--text:#1c2430;--sub:#6b7684;--up:#c0392b;--down:#1e7f4f;--accent:#2f6fde;--hover:#eef3fc}
@@ -47,7 +47,7 @@ tbody tr{cursor:pointer}tbody tr:hover,tbody tr.sel{background:var(--hover)}
 </head>
 <body>
 <header>
-  <h1>信用買い残 平均建玉トラッカー<small id="asof"></small></h1>
+  <h1>信用買い残 平均建値トラッカー<small id="asof"></small></h1>
   <span id="status"></span>
   <label class="sub"><input type="checkbox" id="daily" style="width:auto"> 日々公表銘柄等のみ</label>
   <select id="sdf"><option value="">需給：すべて</option><option>改善</option><option>悪化</option><option>中立</option></select>
@@ -75,15 +75,15 @@ const sdTag = v => v ? `<span class="sd sd-${v}">${v}</span>` : '–';
 // 色は需給への効き方で付ける（買残は増えると悪化=赤、売残は増えると改善=緑）
 const chgCell = (v, sell) => v == null ? '–' :
   `<span class="${v === 0 ? '' : (v > 0) !== !!sell ? 'up' : 'down'}">${v > 0 ? '+' : ''}${f0(v)}</span>`;
-// 乖離率 = 株価が平均建玉単価から何%離れているか（マイナス = 買い方が含み損）
+// 評価損益率（推計）= 終値 ÷ 平均建値 − 1（マイナス = 買い方が含み損）
 const COLS = [
   ['code', 'コード', r => ticker(r.code), 'l'],
   ['name', '銘柄', r => `${r.flag ? `<span class="tag">${r.flag}</span>` : ''}${r.name}<div class="sub" style="font-size:11px">${r.market} ${r.kind}</div>`, 'l name'],
   ['sd', '需給', r => sdTag(r.sd)],
-  ['avg', '平均建玉単価', r => f1(r.avg)],
+  ['avg', '平均建値', r => f1(r.avg)],
   ['avgChg', '前日比', r => `<span class="${cls(r.avgChg)}">${sign(r.avgChg)}</span>`],
   ['close', '終値', r => f1(r.close)],
-  ['gap', '乖離率', r => `<span class="${cls(r.gap)}">${pct(r.gap)}</span>`],
+  ['gap', '評価損益率(推計)', r => `<span class="${cls(r.gap)}">${pct(r.gap)}</span>`],
   ['buy_val', '買残金額(百万円)', r => r.buy_val == null ? '–' : f1(r.buy_val / 1e6)],
   ['buy_sh', '買残(株)', r => f0(r.buy_sh)],
   ['buy_chg_sh', '買残前日比', r => chgCell(r.buy_chg_sh)],
@@ -140,11 +140,11 @@ async function showDetail(code) {
   $('detail').innerHTML = `
     <h2>${ticker(code)} ${d.name}</h2><div class="sub">${d.market} ${d.kind}　${h[0].date} 〜 ${last.date}（${h.length}日分）</div>
     <div class="kpis">
-      <div class="kpi"><span>平均建玉単価</span><b>${f1(last.avg)}</b></div>
+      <div class="kpi"><span>平均建値</span><b>${f1(last.avg)}</b></div>
       <div class="kpi"><span>終値</span><b>${f1(last.close)}</b></div>
-      <div class="kpi"><span>乖離率（買い方損益の目安）</span><b class="${cls(gap)}">${pct(gap)}</b></div>
-      <div class="kpi"><span>制度信用 平均単価</span><b>${f1(last.avg_std)}</b></div>
-      <div class="kpi"><span>一般信用 平均単価</span><b>${f1(last.avg_neg)}</b></div>
+      <div class="kpi"><span>評価損益率（推計）</span><b class="${cls(gap)}">${pct(gap)}</b></div>
+      <div class="kpi"><span>制度信用 平均建値</span><b>${f1(last.avg_std)}</b></div>
+      <div class="kpi"><span>一般信用 平均建値</span><b>${f1(last.avg_neg)}</b></div>
       <div class="kpi"><span>買残金額（百万円）</span><b>${f1(last.buy_val / 1e6)}</b></div>
       <div class="kpi"><span>買残（前日比）</span><b>${f0(last.buy_sh)}</b>${chgCell(last.buy_chg_sh)}</div>
       <div class="kpi"><span>売残（前日比）</span><b>${f0(last.sell_sh)}</b>${chgCell(last.sell_chg_sh, true)}</div>
@@ -163,7 +163,7 @@ async function showDetail(code) {
   const line = (label, data, color, dash) => ({label, data, borderColor: color, backgroundColor: color, borderDash: dash, tension: .2, pointRadius: 3, spanGaps: true});
   charts = [
     new Chart($('c1'), {type: 'line', data: {labels, datasets: [
-      line('平均建玉単価', h.map(r => r.avg), col('--accent')),
+      line('平均建値', h.map(r => r.avg), col('--accent')),
       line('終値', h.map(r => r.close), col('--up'), [4, 3]),
     ]}, options: {maintainAspectRatio: false, interaction: {mode: 'index', intersect: false}}}),
     new Chart($('c2'), {type: 'bar', data: {labels, datasets: [
