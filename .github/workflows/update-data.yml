@@ -6,6 +6,7 @@ on:
   schedule:
     - cron: "14 8 * * 1-5"    # 平日 17:14 JST
     - cron: "14 12 * * 1-5"   # 平日 21:14 JST（公表が遅れた日の取りこぼし用）
+    - cron: "14 21 * * 0-4"   # 翌朝 6:14 JST（GitHub 側で定期実行が飛ばされた日の保険）
   workflow_dispatch:
     inputs:
       force:
