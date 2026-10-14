@@ -29,6 +29,10 @@ td.l,th.l{text-align:left}
 td.name{white-space:normal;min-width:140px}
 tbody tr{cursor:pointer}tbody tr:hover,tbody tr.sel{background:var(--hover)}
 .up{color:var(--up)}.down{color:var(--down)}.sub{color:var(--sub)}
+.sd{display:inline-block;font-size:12px;padding:1px 7px;border-radius:10px;font-weight:600}
+.sd-改善{background:color-mix(in srgb,var(--down) 18%,transparent);color:var(--down)}
+.sd-悪化{background:color-mix(in srgb,var(--up) 18%,transparent);color:var(--up)}
+.sd-中立{color:var(--sub);border:1px solid var(--line)}
 .tag{display:inline-block;font-size:11px;padding:0 5px;border:1px solid var(--line);border-radius:4px;color:var(--sub);margin-right:3px}
 #detail{padding:16px;position:sticky;top:16px}
 #detail h2{font-size:16px;margin:0 0 2px}
@@ -46,6 +50,7 @@ tbody tr{cursor:pointer}tbody tr:hover,tbody tr.sel{background:var(--hover)}
   <h1>信用買い残 平均建玉トラッカー<small id="asof"></small></h1>
   <span id="status"></span>
   <label class="sub"><input type="checkbox" id="daily" style="width:auto"> 日々公表銘柄等のみ</label>
+  <select id="sdf"><option value="">需給：すべて</option><option>改善</option><option>悪化</option><option>中立</option></select>
   <select id="market"><option value="">全市場</option><option>プライム</option><option>スタンダード</option><option>グロース</option><option>投信等</option><option>他</option></select>
   <input id="q" placeholder="コード・銘柄名で検索">
 </header>
@@ -65,18 +70,27 @@ const sign = v => v == null ? '–' : (v > 0 ? '+' : '') + f1(v);
 const cls = v => v > 0 ? 'up' : v < 0 ? 'down' : '';
 const ticker = c => c.slice(0, 4);
 
+// 需給: 買残減・売残増 = 改善（将来の売り圧力が減る／買い戻し燃料が増える）、逆は悪化、割れたら中立
+const sdTag = v => v ? `<span class="sd sd-${v}">${v}</span>` : '–';
+// 色は需給への効き方で付ける（買残は増えると悪化=赤、売残は増えると改善=緑）
+const chgCell = (v, sell) => v == null ? '–' :
+  `<span class="${v === 0 ? '' : (v > 0) !== !!sell ? 'up' : 'down'}">${v > 0 ? '+' : ''}${f0(v)}</span>`;
 // 乖離率 = 株価が平均建玉単価から何%離れているか（マイナス = 買い方が含み損）
 const COLS = [
   ['code', 'コード', r => ticker(r.code), 'l'],
   ['name', '銘柄', r => `${r.flag ? `<span class="tag">${r.flag}</span>` : ''}${r.name}<div class="sub" style="font-size:11px">${r.market} ${r.kind}</div>`, 'l name'],
+  ['sd', '需給', r => sdTag(r.sd)],
   ['avg', '平均建玉単価', r => f1(r.avg)],
   ['avgChg', '前日比', r => `<span class="${cls(r.avgChg)}">${sign(r.avgChg)}</span>`],
   ['close', '終値', r => f1(r.close)],
   ['gap', '乖離率', r => `<span class="${cls(r.gap)}">${pct(r.gap)}</span>`],
   ['buy_val', '買残金額(百万円)', r => r.buy_val == null ? '–' : f1(r.buy_val / 1e6)],
   ['buy_sh', '買残(株)', r => f0(r.buy_sh)],
-  ['buy_chg_sh', '買残前日比', r => `<span class="${cls(r.buy_chg_sh)}">${r.buy_chg_sh > 0 ? '+' : ''}${f0(r.buy_chg_sh)}</span>`],
+  ['buy_chg_sh', '買残前日比', r => chgCell(r.buy_chg_sh)],
   ['buy_ratio', '上場比', r => r.buy_ratio == null ? '–' : f1(r.buy_ratio) + '%'],
+  ['sell_sh', '売残(株)', r => f0(r.sell_sh)],
+  ['sell_chg_sh', '売残前日比', r => chgCell(r.sell_chg_sh, true)],
+  ['ratio', '信用倍率', r => r.ratio == null ? '–' : r.ratio.toFixed(2)],
 ];
 let all = [], meta = {}, rows = [], sortKey = 'buy_val', sortDir = -1, selected = null, charts = [];
 
@@ -101,9 +115,9 @@ function render() {
 
 const MAX_ROWS = 300;   // スマホでも軽く動くよう、表示は並べ替え後の上位だけ
 function applyFilter() {
-  const q = $('q').value.trim().toLowerCase(), m = $('market').value, daily = $('daily').checked;
+  const q = $('q').value.trim().toLowerCase(), m = $('market').value, daily = $('daily').checked, sd = $('sdf').value;
   rows = all.filter(r => (!q || r.code.toLowerCase().startsWith(q) || r.name.toLowerCase().includes(q))
-    && (!m || r.market === m) && (!daily || r.flag));
+    && (!m || r.market === m) && (!daily || r.flag) && (!sd || r.sd === sd));
   $('asof').textContent = `${meta.date} 申込み現在 ／ ${rows.length.toLocaleString()} 銘柄` +
     (rows.length > MAX_ROWS ? `（上位${MAX_ROWS}件を表示）` : '');
   render();
@@ -132,9 +146,14 @@ async function showDetail(code) {
       <div class="kpi"><span>制度信用 平均単価</span><b>${f1(last.avg_std)}</b></div>
       <div class="kpi"><span>一般信用 平均単価</span><b>${f1(last.avg_neg)}</b></div>
       <div class="kpi"><span>買残金額（百万円）</span><b>${f1(last.buy_val / 1e6)}</b></div>
+      <div class="kpi"><span>買残（前日比）</span><b>${f0(last.buy_sh)}</b>${chgCell(last.buy_chg_sh)}</div>
+      <div class="kpi"><span>売残（前日比）</span><b>${f0(last.sell_sh)}</b>${chgCell(last.sell_chg_sh, true)}</div>
+      <div class="kpi"><span>信用倍率 ／ 需給</span><b>${last.ratio == null ? '–' : last.ratio.toFixed(2)}</b>${sdTag(last.sd)}</div>
     </div>
     <div class="chart"><canvas id="c1"></canvas></div>
-    <div class="chart"><canvas id="c2"></canvas></div>`;
+    <div class="chart"><canvas id="c2"></canvas></div>
+    <div class="sub" style="font-size:12px;margin-bottom:4px">需給の推移</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">${h.map(r => `<span><span class="sub" style="font-size:11px">${r.date.slice(5)}</span> ${sdTag(r.sd)}</span>`).join('')}</div>`;
   if (innerWidth <= 1100) $('detail').scrollIntoView({behavior: 'smooth'});
   charts.forEach(c => c.destroy());
   const css = getComputedStyle(document.documentElement);
@@ -150,7 +169,8 @@ async function showDetail(code) {
     new Chart($('c2'), {type: 'bar', data: {labels, datasets: [
       {label: '買残 制度信用(株)', data: h.map(r => r.buy_std_sh), backgroundColor: col('--accent'), stack: 's'},
       {label: '買残 一般信用(株)', data: h.map(r => r.buy_neg_sh), backgroundColor: col('--sub'), stack: 's'},
-    ]}, options: {maintainAspectRatio: false, interaction: {mode: 'index', intersect: false}, scales: {x: {stacked: true}, y: {stacked: true}}}}),
+      {label: '売残(株・右軸)', data: h.map(r => r.sell_sh), type: 'line', borderColor: col('--down'), backgroundColor: col('--down'), pointRadius: 3, yAxisID: 'y1'},
+    ]}, options: {maintainAspectRatio: false, interaction: {mode: 'index', intersect: false}, scales: {x: {stacked: true}, y: {stacked: true}, y1: {position: 'right', grid: {display: false}}}}}),
   ];
 }
 
@@ -159,7 +179,7 @@ $('head').onclick = e => {
   sortDir = k === sortKey ? -sortDir : (k === 'code' || k === 'name' || k === 'gap' ? 1 : -1); sortKey = k; render();
 };
 $('body').onclick = e => { const tr = e.target.closest('tr'); if (tr) showDetail(tr.dataset.code); };
-$('market').onchange = $('daily').onchange = applyFilter;
+$('market').onchange = $('daily').onchange = $('sdf').onchange = applyFilter;
 let timer; $('q').oninput = () => { clearTimeout(timer); timer = setTimeout(applyFilter, 200); };
 load();
 </script>
